@@ -10,18 +10,19 @@ import {
 } from 'lucide-react';
 import InviteFriendModal from '@/components/InviteFriendModal';
 import { supabase } from '@/lib/supabase';
-import { MOCK_RECENT_MATCHES, MOCK_LEADERBOARD, getRatingTier } from '@/lib/mock-data';
+import { getRatingTier } from '@/lib/mock-data';
 import { Profile } from '@/lib/types';
 
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<Profile | null>(null);
+  const [leaderboard, setLeaderboard] = useState<Profile[]>([]);
+  const [recentMatches, setRecentMatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
   const [isInviteOpen, setIsInviteOpen] = useState(false);
 
   useEffect(() => {
-    async function getProfile() {
+    async function getDashboardData() {
       const localId = localStorage.getItem('codeduel_id');
       
       if (!localId) {
@@ -29,23 +30,33 @@ export default function DashboardPage() {
         return;
       }
 
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', localId)
-        .single();
+      // Fetch User, Leaderboard, and Recent Matches
+      const [userRes, leaderboardRes, matchesRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', localId).single(),
+        supabase.from('profiles').select('*').order('rating', { ascending: false }).limit(5),
+        supabase.from('match_results').select('*, winner:profiles!winner_id(username, avatar)').order('created_at', { ascending: false }).limit(3)
+      ]);
 
-      if (error) {
-        console.error('Error fetching profile:', error);
-        localStorage.removeItem('codeduel_id'); // Clear invalid ID
+      if (userRes.error) {
+        console.error('Error fetching profile:', userRes.error);
+        localStorage.removeItem('codeduel_id');
         router.push('/login');
       } else {
-        setUser(profile);
+        setUser(userRes.data);
       }
+
+      if (!leaderboardRes.error && leaderboardRes.data) {
+        setLeaderboard(leaderboardRes.data);
+      }
+
+      if (!matchesRes.error && matchesRes.data) {
+        setRecentMatches(matchesRes.data);
+      }
+
       setLoading(false);
     }
 
-    getProfile();
+    getDashboardData();
   }, [router]);
 
   if (loading || !user) {
@@ -53,7 +64,7 @@ export default function DashboardPage() {
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="w-10 h-10 text-primary animate-spin" />
-          <p className="text-sm font-black text-muted-foreground uppercase tracking-widest">Loading Duelist Records...</p>
+          <p className="text-sm font-black text-muted-foreground uppercase tracking-widest">Synthesizing Stats...</p>
         </div>
       </div>
     );
@@ -90,10 +101,9 @@ export default function DashboardPage() {
 
       <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-12 gap-8">
         
-        {/* ── Left Column: Profile & Stats ── */}
+        {/* Left Column: Stats */}
         <div className="md:col-span-8 space-y-8">
           
-          {/* Challenge & Quick Match Action Card */}
           <div className="flex flex-col sm:flex-row gap-4">
             <button 
               onClick={() => setIsInviteOpen(true)}
@@ -108,9 +118,7 @@ export default function DashboardPage() {
                   <p className="text-sm text-muted-foreground font-medium">Create a private duel link</p>
                 </div>
               </div>
-              <div className="w-12 h-12 rounded-2xl bg-secondary flex items-center justify-center text-muted-foreground group-hover:text-primary transition-colors">
-                <Plus className="w-6 h-6" />
-              </div>
+              <Plus className="w-6 h-6 text-muted-foreground group-hover:text-primary transition-colors" />
             </button>
 
             <Link href="/queue" className="flex-1 glass-card rounded-[32px] p-8 flex items-center justify-between group hover:border-emerald-500/30 transition-all text-left">
@@ -123,151 +131,127 @@ export default function DashboardPage() {
                   <p className="text-sm text-muted-foreground font-medium">Match with global rivals</p>
                 </div>
               </div>
-              <div className="w-12 h-12 rounded-2xl bg-secondary flex items-center justify-center text-muted-foreground group-hover:text-emerald-500 transition-colors">
-                <ChevronRight className="w-6 h-6" />
-              </div>
+              <ChevronRight className="w-6 h-6 text-muted-foreground group-hover:text-emerald-500 transition-colors" />
             </Link>
           </div>
 
-          {/* Profile Header Card */}
-          <div className="glass-card rounded-3xl p-8 flex flex-col sm:flex-row items-center gap-8 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-[100px] pointer-events-none" />
+          {/* User Hero */}
+          <div className="glass-card rounded-[40px] p-10 flex flex-col sm:flex-row items-center gap-10 relative overflow-hidden group hover:border-primary/20 transition-all">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-[100px] pointer-events-none group-hover:w-40 group-hover:h-40 transition-all" />
             
-            <Link href="/profile" className="relative group/avatar">
-              <div className="w-32 h-32 rounded-3xl bg-secondary flex items-center justify-center text-5xl border-4 border-background shadow-xl group-hover/avatar:scale-105 transition-transform duration-300">
+            <Link href="/profile" className="relative shrink-0">
+              <div className="w-32 h-32 rounded-3xl bg-secondary flex items-center justify-center text-5xl border-4 border-background shadow-xl hover:rotate-3 transition-transform">
                 {user.avatar}
               </div>
-              <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-primary rounded-2xl flex items-center justify-center text-white border-4 border-background shadow-lg group-hover/avatar:rotate-12 transition-transform">
+              <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-primary rounded-2xl flex items-center justify-center text-white border-4 border-background shadow-lg">
                 <Star className="w-5 h-5 fill-current" />
               </div>
             </Link>
 
             <div className="flex-1 text-center sm:text-left">
-              <Link href="/profile" className="inline-flex items-center gap-2 group/title">
-                <h1 className="text-4xl font-black text-foreground mb-1 group-hover/title:text-primary transition-colors">
-                  {user.username}
-                </h1>
-                <ChevronRight className="w-6 h-6 text-primary opacity-0 -translate-x-2 group-hover/title:opacity-100 group-hover/title:translate-x-0 transition-all" />
-              </Link>
-              <p className="text-muted-foreground font-medium mb-4">Level {Math.floor(user.rating / 100)} Duelist</p>
+              <h1 className="text-4xl font-black text-foreground mb-1">{user.username}</h1>
+              <p className="text-muted-foreground font-medium mb-6">Mastery Level: {getRatingTier(user.rating).label}</p>
               
               <div className="flex flex-wrap justify-center sm:justify-start gap-4">
-                <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/5 border border-primary/10">
+                <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 rounded-2xl border border-primary/10">
                   <Trophy className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-bold text-foreground">{user.rating} ELO</span>
+                  <span className="text-sm font-black text-foreground">{user.rating} ELO</span>
                 </div>
-                <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-500/5 border border-orange-500/10">
-                  <TrendingUp className="w-4 h-4 text-orange-500" />
-                  <span className="text-sm font-bold text-foreground">
-                    {Math.round((user.wins / (user.wins + user.losses + user.draws)) * 100)}% Win Rate
-                  </span>
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/5 rounded-2xl border border-amber-500/10">
+                  <Zap className="w-4 h-4 text-amber-500 fill-current" />
+                  <span className="text-sm font-black text-foreground">{user.streak} Streak</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Quick Stats Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* Performance Overview */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             {[
-              { icon: <Target className="w-5 h-5 text-indigo-500" />, label: 'Accuracy', value: '88%' },
-              { icon: <Clock className="w-5 h-5 text-amber-500" />, label: 'Avg Time', value: '12m' },
-              { icon: <Star className="w-5 h-5 text-emerald-500" />, label: 'Streak', value: user.streak },
-              { icon: <BarChart3 className="w-5 h-5 text-rose-500" />, label: 'Duels', value: user.wins + user.losses + user.draws },
-            ].map((s, i) => (
-              <div key={i} className="glass-card rounded-2xl p-6 text-center hover:scale-[1.02] transition-transform cursor-pointer">
-                <div className="flex justify-center mb-3">
-                  <div className="w-10 h-10 rounded-xl bg-background border border-border flex items-center justify-center shadow-sm">
-                    {s.icon}
-                  </div>
+              { label: 'Duels Attended', value: user.wins + user.losses, icon: Swords, color: 'text-primary' },
+              { label: 'Victories', value: user.wins, icon: Target, color: 'text-emerald-500' },
+              { label: 'Combat Rank', value: '#124', icon: BarChart3, color: 'text-amber-500' },
+            ].map((stat, i) => (
+              <div key={i} className="glass-card rounded-3xl p-6 flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-2xl bg-secondary flex items-center justify-center ${stat.color}`}>
+                  <stat.icon className="w-6 h-6" />
                 </div>
-                <p className="text-2xl font-black text-foreground">{s.value}</p>
-                <p className="text-xs uppercase tracking-widest text-muted-foreground font-bold mt-1">{s.label}</p>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-muted-foreground mb-0.5">{stat.label}</p>
+                  <p className="text-xl font-black text-foreground leading-none">{stat.value}</p>
+                </div>
               </div>
             ))}
           </div>
+        </div>
 
-          {/* Recent Matches */}
-          <div className="glass-card rounded-3xl overflow-hidden">
-            <div className="px-8 py-6 border-b border-border flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground">
-                  <History className="w-5 h-5" />
-                </div>
-                <h2 className="text-xl font-black">Match History</h2>
-              </div>
-              <button className="text-sm font-bold text-primary hover:text-primary/80 transition-colors flex items-center gap-1">
-                Full Log <ArrowUpRight className="w-4 h-4" />
-              </button>
+        {/* Right Column: Leaderboard & Matches */}
+        <div className="md:col-span-4 space-y-8">
+          {/* Leaderboard */}
+          <section className="glass-card rounded-[32px] p-8 border-primary/10">
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground flex items-center gap-2">
+                <Trophy className="w-3.5 h-3.5" /> High Standings
+              </h3>
+              <Link href="/leaderboard" className="text-[10px] font-black text-primary hover:underline">GLOBAL ↗</Link>
             </div>
             
-            <div className="divide-y divide-border">
-              {MOCK_RECENT_MATCHES.map((match) => (
-                <div key={match.id} className="px-8 py-5 flex items-center justify-between hover:bg-secondary/30 transition-colors group">
-                  <div className="flex items-center gap-6">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm ${match.result === 'win' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
-                      {match.result === 'win' ? <Trophy className="w-6 h-6 text-white" /> : <Swords className="w-6 h-6 text-white opacity-40" />}
+            <div className="space-y-6">
+              {leaderboard.length > 0 ? (
+                leaderboard.map((item, idx) => (
+                  <div key={item.id} className={`flex items-center justify-between p-3 rounded-2xl transition-all ${item.id === user.id ? 'bg-primary/5 border border-primary/10 shadow-sm' : 'hover:bg-secondary/50'}`}>
+                    <div className="flex items-center gap-4">
+                      <span className="text-xs font-black text-muted-foreground w-3">{idx + 1}</span>
+                      <div className="w-10 h-10 rounded-xl bg-background border border-border flex items-center justify-center text-xl">{item.avatar}</div>
+                      <div>
+                        <p className="text-sm font-bold text-foreground truncate max-w-[100px]">{item.username}</p>
+                        <p className={`text-[9px] font-black uppercase tracking-widest ${getRatingTier(item.rating).color}`}>{getRatingTier(item.rating).label}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-bold text-foreground">vs {match.opponent}</p>
-                      <p className="text-xs text-muted-foreground">Difficulty: {match.difficulty} • {match.problem_title}</p>
-                    </div>
+                    <p className="text-sm font-black text-foreground">{item.rating}</p>
                   </div>
-                  
-                  <div className="text-right">
-                    <p className={`text-lg font-black ${match.result === 'win' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                      {match.result === 'win' ? '+' : ''}{match.rating_delta}
-                    </p>
-                    <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">{new Date(match.played_at).toLocaleDateString()}</p>
-                  </div>
+                ))
+              ) : (
+                <div className="py-10 text-center opacity-40">
+                  <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest">Awaiting Rivals...</p>
                 </div>
-              ))}
+              )}
             </div>
-          </div>
-        </div>
+          </section>
 
-        {/* ── Right Column: Leaderboard ── */}
-        <div className="md:col-span-4 space-y-8">
-          <div className="glass-card rounded-3xl overflow-hidden h-full">
-            <div className="px-8 py-6 border-b border-border bg-gradient-to-br from-background to-secondary/50">
-              <div className="flex items-center gap-3 mb-1">
-                <Medal className="w-5 h-5 text-amber-500" />
-                <h2 className="text-xl font-black italic tracking-tighter uppercase">Leaderboard</h2>
-              </div>
-              <p className="text-xs text-muted-foreground font-medium">Top 50 Masters Globally</p>
-            </div>
-
-            <div className="p-4 space-y-2">
-              {MOCK_LEADERBOARD.map((item) => (
-                <div 
-                  key={item.profile.id} 
-                  className={`flex items-center justify-between p-4 rounded-2xl transition-all ${item.profile.id === user.id ? 'bg-primary/5 border border-primary/20 shadow-sm' : 'hover:bg-secondary/50'}`}
-                >
-                  <div className="flex items-center gap-4">
-                    <span className={`text-sm font-black w-4 ${item.rank <= 3 ? 'text-primary' : 'text-muted-foreground'}`}>{item.rank}</span>
-                    <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center text-xl shadow-inner">{item.profile.avatar}</div>
-                    <div>
-                      <p className="text-sm font-bold text-foreground leading-none mb-1">{item.profile.username}</p>
-                      <p className="text-[10px] uppercase tracking-widest font-black text-muted-foreground">{getRatingTier(item.profile.rating).label}</p>
-                    </div>
+          {/* Recent Matches */}
+          <section className="glass-card rounded-[32px] p-8">
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground mb-8 flex items-center gap-2">
+              <History className="w-3.5 h-3.5" /> Recent Combat
+            </h3>
+            
+            <div className="space-y-6">
+              {recentMatches.length > 0 ? (
+                recentMatches.map((match, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-3 rounded-2xl bg-secondary/30">
+                     <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-background flex items-center justify-center text-lg">{match.winner?.avatar || '👤'}</div>
+                        <div>
+                          <p className="text-xs font-bold text-foreground">{match.winner?.username || 'Guest'} won</p>
+                          <p className="text-[9px] text-muted-foreground">Against rival • 2m ago</p>
+                        </div>
+                     </div>
+                     <div className="px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-500 text-[10px] font-black">WIN</div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-black text-foreground">{item.profile.rating}</p>
-                    <p className="text-[10px] text-muted-foreground">ELO</p>
-                  </div>
+                ))
+              ) : (
+                <div className="py-8 text-center bg-secondary/30 rounded-2xl border-2 border-dashed border-border flex flex-col items-center">
+                  <Clock className="w-6 h-6 text-muted-foreground/30 mb-2" />
+                  <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">No Recent Matches</p>
                 </div>
-              ))}
-              
-              <Link href="/leaderboard" className="block text-center mt-6 p-4 rounded-2xl bg-secondary/50 text-xs font-bold text-primary hover:bg-secondary transition-all">
-                VIEW GLOBAL RANKINGS
-              </Link>
+              )}
             </div>
-          </div>
+          </section>
         </div>
       </div>
-      <InviteFriendModal 
-        isOpen={isInviteOpen} 
-        onClose={() => setIsInviteOpen(false)} 
-      />
+
+      <InviteFriendModal isOpen={isInviteOpen} onClose={() => setIsInviteOpen(false)} />
     </div>
   );
 }

@@ -13,7 +13,6 @@ import ArenaSettingsModal from '@/components/ArenaSettingsModal';
 import { supabase } from '@/lib/supabase';
 import { MOCK_PROBLEMS, MOCK_PROFILES, getRatingTier, DEFAULT_STUBS } from '@/lib/mock-data';
 import { Language, TestResult, SubmissionStatus, Problem, Profile } from '@/lib/types';
-import { io, Socket } from 'socket.io-client';
 import { toast } from 'sonner';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => (
@@ -28,8 +27,9 @@ type ActivePanel = 'description' | 'results';
 export default function ArenaPage() {
   const params = useParams();
   const router = useRouter();
-  const matchId = params.match_id as string;
+  const matchId = params?.match_id as string || 'default';
 
+  // State
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [opponent, setOpponent] = useState<Profile>(MOCK_PROFILES[0]);
@@ -45,6 +45,12 @@ export default function ArenaPage() {
   const [winnerDeclared, setWinnerDeclared] = useState(false);
   const [opponentProgress] = useState(Math.floor(Math.random() * 40));
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Supabase Channel state
+  const [channel, setChannel] = useState<any>(null);
+  const [lobbyStatus, setLobbyStatus] = useState<'lobby' | 'active'>(matchId.startsWith('friend-') ? 'lobby' : 'active');
+  const [connectedOpponent, setConnectedOpponent] = useState<Profile | null>(null);
 
   // Settings state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -53,13 +59,6 @@ export default function ArenaPage() {
     theme: 'vs-light' as const,
     minimap: false,
   });
-
-  const [isGenerating, setIsGenerating] = useState(false);
-
-  // Socket & Friend Duel state
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [lobbyStatus, setLobbyStatus] = useState<'lobby' | 'active'>(matchId.startsWith('friend-') ? 'lobby' : 'active');
-  const [connectedOpponent, setConnectedOpponent] = useState<Profile | null>(null);
 
   useEffect(() => {
     async function initArena() {
@@ -90,19 +89,17 @@ export default function ArenaPage() {
         const genResponse = await fetch('/api/ai/generate-problem', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ difficulty: 'Medium' }) // Tailor to user rank later
+          body: JSON.stringify({ difficulty: 'Medium' })
         });
         const genData = await genResponse.json();
         
         if (genData.error) {
-          console.warn('AI Gen failed, falling back to DB/Mock:', genData.error);
           const { data: dbProblems } = await supabase.from('problems').select('*');
           setProblem(dbProblems?.[0] || MOCK_PROBLEMS[0]);
         } else {
           setProblem(genData);
         }
       } catch (err) {
-        console.error('Problem Generation failed:', err);
         setProblem(MOCK_PROBLEMS[0]);
       } finally {
         setIsGenerating(false);
@@ -113,34 +110,52 @@ export default function ArenaPage() {
   }, [router]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !matchId) return;
     
-    // Connect to Production Socket Server or fall back to local
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || '';
-    const newSocket = io(socketUrl, {
-      path: '/socket.io',
-      transports: ['websocket', 'polling']
+    // ⚔️ Initialize Supabase Realtime Channel
+    const newChannel = supabase.channel(`arena:${matchId}`, {
+      config: {
+        presence: {
+          key: currentUser.id,
+        },
+      },
     });
 
-    setSocket(newSocket);
-    
-    // Join room directly
-    newSocket.emit('room:join', { roomId: matchId, profile: currentUser });
+    // ── Handle Presence (Detecting Opponent) ──
+    newChannel
+      .on('presence', { event: 'sync' }, () => {
+        const newState = newChannel.presenceState();
+        const players = Object.values(newState).flat() as any[];
+        
+        // Find the opponent (not me)
+        const peer = players.find(p => p.id !== currentUser.id);
+        if (peer) {
+          setConnectedOpponent(peer);
+          setLobbyStatus('active');
+          if (!connectedOpponent) {
+            toast.success(`${peer.username} joined the arena!`, {
+              icon: '⚔️',
+              description: 'The duel has officially begun.',
+            });
+          }
+        }
+      })
+      .on('broadcast', { event: 'duel_update' }, ({ payload }) => {
+        // Handle signals from opponent (e.g., they submitted)
+        if (payload.event === 'submitted' && payload.winnerId) {
+          setWinnerDeclared(true);
+        }
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await newChannel.track(currentUser);
+        }
+      });
 
-    newSocket.on('room:matched', (data: { players: Profile[], isStarting: boolean }) => {
-      if (data.isStarting) {
-        const friend = data.players.find((p: Profile) => p.id !== currentUser.id) || MOCK_PROFILES[0];
-        setConnectedOpponent(friend);
-        setLobbyStatus('active');
-        toast.success(`${friend.username} joined the arena! Get ready!`, {
-          icon: '⚔️',
-          description: 'A lively duel is about to begin.',
-        });
-      }
-    });
+    setChannel(newChannel);
 
     return () => {
-      newSocket.disconnect();
+      newChannel.unsubscribe();
     };
   }, [matchId, currentUser]);
 
@@ -204,9 +219,21 @@ export default function ArenaPage() {
         if (data.success) {
           setSubmissionStatus('passed');
           setWinnerDeclared(true);
+
+          // ⚔️ Broadcast win to opponent
+          if (channel) {
+            channel.send({
+              type: 'broadcast',
+              event: 'duel_update',
+              payload: { event: 'submitted', winnerId: currentUser.id }
+            });
+          }
+
           toast.success('All test cases passed! Analyzing code with AI...', {
             icon: '🧠',
           });
+          
+          // ... rest of the logic ...
 
           // ── Call Claude AI Analysis ──
           try {
