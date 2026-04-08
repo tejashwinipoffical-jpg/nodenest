@@ -22,10 +22,11 @@ export default function InviteFriendModal({ isOpen, onClose }: InviteFriendModal
   }, [isOpen]);
 
   const inviteLink = typeof window !== 'undefined' 
-    ? `${window.location.protocol}//${window.location.host}/arena/${roomId}` 
+    ? `${window.location.origin}/arena/${roomId}` 
     : '';
 
   const copyToClipboard = () => {
+    if (!inviteLink) return;
     navigator.clipboard.writeText(inviteLink);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -36,7 +37,7 @@ export default function InviteFriendModal({ isOpen, onClose }: InviteFriendModal
       try {
         await navigator.share({
           title: 'CodeDuel Arena Challenge',
-          text: `I'm challenging you to a lively 1v1 coding duel! Join my room here:`,
+          text: `⚔️ Challenge Alert! Join my CodeDuel Arena room to battle 1v1!`,
           url: inviteLink,
         });
       } catch (err) {
@@ -48,13 +49,16 @@ export default function InviteFriendModal({ isOpen, onClose }: InviteFriendModal
   };
 
   const shareWhatsApp = () => {
-    const text = `🔥 Challenge Accepted? Join my CodeDuel Arena room to battle 1v1! %0A%0AJoin here: ${inviteLink}`;
-    window.open(`https://wa.me/?text=${text}`, '_blank');
+    // Putting the link first often helps apps generate the preview/clickable link better
+    const text = `Join my CodeDuel Arena room: ${inviteLink}\n\n⚔️ Challenge Accepted? Battle me 1v1!`;
+    const encodedText = encodeURIComponent(text);
+    window.open(`https://wa.me/?text=${encodedText}`, '_blank');
   };
 
   const shareTwitter = () => {
-    const text = `I'm looking for a rival on CodeDuel Arena! Who's ready to duel? ⚔️%0A%0AJoin my room: ${inviteLink}`;
-    window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank');
+    const text = `Ready for a duel? ⚔️ Join my arena on CodeDuel! \n\n${inviteLink}`;
+    const encodedText = encodeURIComponent(text);
+    window.open(`https://twitter.com/intent/tweet?text=${encodedText}`, '_blank');
   };
 
   return (
