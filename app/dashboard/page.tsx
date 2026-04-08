@@ -106,19 +106,26 @@ export default function DashboardPage() {
           
           <div className="flex flex-col sm:flex-row gap-4">
             <button 
-              onClick={() => setIsInviteOpen(true)}
-              className="flex-1 glass-card rounded-[32px] p-8 flex items-center justify-between group hover:border-primary/30 transition-all text-left"
+              onClick={() => {
+                const link = `${window.location.origin}/arena/friend-${Math.random().toString(36).substring(7)}`;
+                navigator.clipboard.writeText(link);
+                toast.success('Duel Link Copied!', {
+                  description: 'Send it to your friend to start! ⚔️',
+                  icon: '🔗'
+                });
+              }}
+              className="flex-1 glass-card rounded-[32px] p-8 border-2 border-primary/20 bg-primary/5 flex items-center justify-between group hover:bg-primary/10 transition-all text-left"
             >
               <div className="flex items-center gap-6">
-                <div className="w-16 h-16 rounded-[24px] bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all duration-500">
-                  <Share2 className="w-8 h-8" />
+                <div className="w-16 h-16 rounded-[24px] bg-primary flex items-center justify-center text-white shadow-lg shadow-primary/20">
+                  <Copy className="w-8 h-8" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-black text-foreground">Invite Friend</h3>
-                  <p className="text-sm text-muted-foreground font-medium">Create a private duel link</p>
+                  <h3 className="text-xl font-black text-foreground">Fast Invite</h3>
+                  <p className="text-sm text-primary font-bold">Copy Link & Send</p>
                 </div>
               </div>
-              <Plus className="w-6 h-6 text-muted-foreground group-hover:text-primary transition-colors" />
+              <ChevronRight className="w-6 h-6 text-primary" />
             </button>
 
             <Link href="/queue" className="flex-1 glass-card rounded-[32px] p-8 flex items-center justify-between group hover:border-emerald-500/30 transition-all text-left">
