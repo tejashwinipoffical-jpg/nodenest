@@ -12,6 +12,7 @@ import InviteFriendModal from '@/components/InviteFriendModal';
 import { supabase } from '@/lib/supabase';
 import { getRatingTier } from '@/lib/mock-data';
 import { Profile } from '@/lib/types';
+import { toast } from 'sonner';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -20,6 +21,10 @@ export default function DashboardPage() {
   const [recentMatches, setRecentMatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isInviteOpen, setIsInviteOpen] = useState(false);
+  
+  // ⚔️ Lobby Lobby States
+  const [hostingId, setHostingId] = useState<string | null>(null);
+  const [lobbyPlayers, setLobbyPlayers] = useState<any[]>([]);
 
   useEffect(() => {
     async function getDashboardData() {
@@ -58,6 +63,46 @@ export default function DashboardPage() {
 
     getDashboardData();
   }, [router]);
+
+  // ── Sync with Live Lobby ──
+  useEffect(() => {
+    if (!user) return;
+
+    const lobbyChannel = supabase.channel('lobby:presence', {
+      config: { presence: { key: user.id } }
+    });
+
+    lobbyChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = lobbyChannel.presenceState();
+        const players = Object.values(state).flat() as any[];
+        setLobbyPlayers(players.filter(p => !!p.hostingId));
+      })
+      .subscribe();
+
+    return () => {
+      lobbyChannel.unsubscribe();
+    };
+  }, [user]);
+
+  const hostDuel = async () => {
+    const id = `friend-${Math.random().toString(36).substring(7)}`;
+    setHostingId(id);
+    
+    const lobbyChannel = supabase.channel('lobby:presence');
+    await lobbyChannel.subscribe();
+    await lobbyChannel.track({
+      id: user?.id,
+      username: user?.username,
+      avatar: user?.avatar,
+      rating: user?.rating,
+      hostingId: id
+    });
+    
+    toast.success('You are now Hosting!', {
+      description: 'Your friends can see you in the Live Lobby now.'
+    });
+  };
 
   if (loading || !user) {
     return (
@@ -105,28 +150,39 @@ export default function DashboardPage() {
         <div className="md:col-span-8 space-y-8">
           
           <div className="flex flex-col sm:flex-row gap-4">
-            <button 
-              onClick={() => {
-                const link = `${window.location.origin}/arena/friend-${Math.random().toString(36).substring(7)}`;
-                navigator.clipboard.writeText(link);
-                toast.success('Duel Link Copied!', {
-                  description: 'Send it to your friend to start! ⚔️',
-                  icon: '🔗'
-                });
-              }}
-              className="flex-1 glass-card rounded-[32px] p-8 border-2 border-primary/20 bg-primary/5 flex items-center justify-between group hover:bg-primary/10 transition-all text-left"
-            >
-              <div className="flex items-center gap-6">
-                <div className="w-16 h-16 rounded-[24px] bg-primary flex items-center justify-center text-white shadow-lg shadow-primary/20">
-                  <Copy className="w-8 h-8" />
+            {/* Lobby Control */}
+            {!hostingId ? (
+              <button 
+                onClick={hostDuel}
+                className="flex-1 glass-card rounded-[32px] p-8 border-2 border-primary/20 bg-primary/5 flex items-center justify-between group hover:bg-primary/10 transition-all text-left"
+              >
+                <div className="flex items-center gap-6">
+                  <div className="w-16 h-16 rounded-[24px] bg-primary flex items-center justify-center text-white shadow-lg shadow-primary/20">
+                    <Swords className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-foreground uppercase italic tracking-tighter">Host Arena</h3>
+                    <p className="text-sm text-primary font-bold">Show up in Live Lobby</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-xl font-black text-foreground">Fast Invite</h3>
-                  <p className="text-sm text-primary font-bold">Copy Link & Send</p>
+                <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
+                  <Plus className="w-6 h-6" />
                 </div>
+              </button>
+            ) : (
+              <div className="flex-1 glass-card rounded-[32px] p-8 border-2 border-emerald-500/20 bg-emerald-500/5 flex items-center justify-between group animate-pulse">
+                <div className="flex items-center gap-6">
+                  <div className="w-16 h-16 rounded-[24px] bg-emerald-500 flex items-center justify-center text-white shadow-lg">
+                    <Loader2 className="w-8 h-8 animate-spin" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-foreground">Waiting for Rival...</h3>
+                    <p className="text-sm text-emerald-600 font-bold">You are Live in Lobby</p>
+                  </div>
+                </div>
+                <button onClick={() => setHostingId(null)} className="text-[10px] font-black uppercase text-rose-500 hover:underline">Cancel</button>
               </div>
-              <ChevronRight className="w-6 h-6 text-primary" />
-            </button>
+            )}
 
             <Link href="/queue" className="flex-1 glass-card rounded-[32px] p-8 flex items-center justify-between group hover:border-emerald-500/30 transition-all text-left">
               <div className="flex items-center gap-6">
@@ -134,13 +190,66 @@ export default function DashboardPage() {
                   <Zap className="w-8 h-8 fill-current" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-black text-foreground">Random Duel</h3>
+                  <h3 className="text-xl font-black text-foreground uppercase italic tracking-tighter">Random Duel</h3>
                   <p className="text-sm text-muted-foreground font-medium">Match with global rivals</p>
                 </div>
               </div>
-              <ChevronRight className="w-6 h-6 text-muted-foreground group-hover:text-emerald-500 transition-colors" />
+              <ChevronRight className="w-6 h-6 text-muted-foreground transition-colors group-hover:text-emerald-500" />
             </Link>
           </div>
+
+          {/* 🛡️ NEW: LIVE LOBBY SECTION ── */}
+          <section className="glass-card rounded-[40px] p-8 border-primary/20 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-5">
+              <Users className="w-32 h-32" />
+            </div>
+            
+            <div className="flex items-center justify-between mb-8 relative z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                  <Layout className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-foreground tracking-tight">LIVE ARENA <span className="text-primary font-black italic">LOBBY</span></h2>
+                  <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">Active Waiting Rooms</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[10px] font-black text-muted-foreground uppercase">{lobbyPlayers.length} Active Hosts</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 relative z-10">
+              {lobbyPlayers.length > 0 ? (
+                lobbyPlayers.map((player) => (
+                  <div key={player.id} className="p-5 rounded-[28px] bg-secondary/50 border border-border flex items-center justify-between group hover:border-primary/30 transition-all">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-background flex items-center justify-center text-2xl shadow-sm border border-border group-hover:rotate-3 transition-transform">
+                        {player.avatar}
+                      </div>
+                      <div>
+                        <p className="text-sm font-black text-foreground">{player.username}</p>
+                        <p className="text-[10px] font-bold text-primary">{player.rating} ELO</p>
+                      </div>
+                    </div>
+                    <Link 
+                      href={`/arena/${player.hostingId}`}
+                      className="px-6 py-2.5 rounded-2xl bg-primary text-white text-[10px] font-black uppercase tracking-widest hover:brightness-110 shadow-lg shadow-primary/20 transition-all"
+                    >
+                      JOIN DUEL
+                    </Link>
+                  </div>
+                ))
+              ) : (
+                <div className="col-span-full py-12 flex flex-col items-center justify-center bg-secondary/30 rounded-[32px] border-2 border-dashed border-border opacity-50">
+                  <Users className="w-10 h-10 text-muted-foreground mb-4" />
+                  <p className="text-xs font-black uppercase tracking-widest">No Friends Waiting Yet</p>
+                  <p className="text-[10px] font-medium">Be the first to Host an Arena!</p>
+                </div>
+              )}
+            </div>
+          </section>
 
           {/* User Hero */}
           <div className="glass-card rounded-[40px] p-10 flex flex-col sm:flex-row items-center gap-10 relative overflow-hidden group hover:border-primary/20 transition-all">
